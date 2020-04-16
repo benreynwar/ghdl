@@ -349,6 +349,7 @@ package body Grt.Vcd is
    begin
       --  Extract type of the signal.
       Vhpi_Handle (VhpiSubtype, Sig, Sig_Type, Error);
+
       if Error /= AvhpiErrorOk then
          Avhpi_Error (Error);
          return;

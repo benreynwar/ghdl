@@ -164,6 +164,9 @@ package body Grt.Avhpi is
                   Error := AvhpiErrorBadRel;
             end case;
             return;
+         when VhpiRecordElems  =>
+            begin
+            end; 
          when others =>
             null;
       end case;

@@ -51,7 +51,8 @@ with Grt.Hooks; use Grt.Hooks;
 with Grt.Options;
 with Grt.Vcd; use Grt.Vcd;
 with Grt.Errors; use Grt.Errors;
-with Grt.Rtis_Types;
+with Grt.Rtis_Types; use Grt.Rtis_Types;
+with Grt.Rtis; use Grt.Rtis;
 with Grt.Std_Logic_1164; use Grt.Std_Logic_1164;
 with Grt.Callbacks; use Grt.Callbacks;
 with Grt.Vstrings; use Grt.Vstrings;
@@ -68,7 +69,7 @@ package body Grt.Vpi is
    Version : constant String := "0.1" & NUL;
 
    --  If true, emit traces
-   Flag_Trace : Boolean := False;
+   Flag_Trace : Boolean := True;
    Trace_File : FILEs;
    Trace_Indent : Natural := 0;
 
@@ -528,6 +529,41 @@ package body Grt.Vpi is
       return Res;
    end vpi_get;
 
+
+   function Rti_To_Vpi_Kind (Rti : Ghdl_Rtin_Type_Array_Acc)
+                             return Integer
+   is
+      It : Ghdl_Rti_Access;
+   begin
+      --  Support only one-dimensional arrays...
+      if Rti.Nbr_Dim /= 1 then
+         return vpiUndefined;
+      end if;
+      --  ... whose index is a scalar...
+      It := Rti.Indexes (0);
+      if It.Kind /= Ghdl_Rtik_Subtype_Scalar then
+         return vpiUndefined;
+      end if;
+      --  ... integer.
+      if To_Ghdl_Rtin_Subtype_Scalar_Acc (It).Basetype.Kind
+        /= Ghdl_Rtik_Type_I32
+      then
+         return vpiUndefined;
+      end if;
+
+      -- bit and std_logic are a special case
+      -- and arrays of them are mapped to vpiNet.
+      if Rti.Element = Std_Standard_Bit_RTI_Ptr then
+         return vpiNet;
+      elsif Rti.Element = Ieee_Std_Logic_1164_Std_Ulogic_RTI_Ptr then
+         return vpiNet;
+      --elsif Rti.Element = Ieee_Std_Logic_1164_Std_Logic_RTI_Ptr then
+      --   return vpiNet;
+      else
+         return vpiNetArray;
+      end if;
+   end Rti_To_Vpi_Kind;
+
    function Vhpi_Handle_To_Vpi_Prop (Res : VhpiHandleT) return Integer is
    begin
       case Vhpi_Get_Kind (Res) is
@@ -538,32 +574,47 @@ package body Grt.Vpi is
            | VhpiForGenerateK
            | VhpiCompInstStmtK =>
             return vpiModule;
-         when VhpiPortDeclK =>
+         when VhpiPortDeclK
+           | VhpiSigDeclK
+            | VhpiGenericDeclK =>
             declare
-               Info : Verilog_Wire_Info;
+               Sig_Type : VhpiHandleT;
+               Rti : Ghdl_Rti_Access;
+               Error : AvhpiErrorT;
             begin
-               Get_Verilog_Wire (Res, Info);
-               if Info.Vtype /= Vcd_Bad then
+            Vhpi_Handle (VhpiSubtype, Res, Sig_Type, Error);
+            if Error /= AvhpiErrorOk then
+               return vpiUndefined;
+            end if;
+            Trace_Newline;
+            Trace("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^");
+            Rti := Avhpi_Get_Rti (Sig_Type);
+            case Rti.Kind is
+               when Ghdl_Rtik_Type_B1
+                 | Ghdl_Rtik_Type_E8
+                 | Ghdl_Rtik_Subtype_Scalar =>
+                  Trace_Newline;
+                  Trace("^^ It's Net!");
                   return vpiNet;
-               end if;
-            end;
-         when VhpiSigDeclK =>
-            declare
-               Info : Verilog_Wire_Info;
-            begin
-               Get_Verilog_Wire (Res, Info);
-               if Info.Vtype /= Vcd_Bad then
-                  return vpiNet;
-               end if;
-            end;
-         when VhpiGenericDeclK =>
-            declare
-               Info : Verilog_Wire_Info;
-            begin
-               Get_Verilog_Wire (Res, Info);
-               if Info.Vtype /= Vcd_Bad then
-                  return vpiParameter;
-               end if;
+               when Ghdl_Rtik_Subtype_Array
+                 | Ghdl_Rtik_Type_Array =>
+                  declare
+                     Arr_Rti : Ghdl_Rtin_Type_Array_Acc;
+                  begin
+                     Arr_Rti := To_Ghdl_Rtin_Type_Array_Acc (Rti);
+                     Trace_Newline;
+                     Trace("^^ It's an array!");
+                  return Rti_To_Vpi_Kind(Arr_Rti);
+                  end;
+               when Ghdl_Rtik_Type_Record =>
+                  Trace_Newline;
+                  Trace("^^ It's a record!");
+                  return vpiStructNet;
+               when others =>
+                  Trace_Newline;
+                  Trace("^^ It's Undefined!");
+                  return vpiUndefined;
+               end case;
             end;
          when others =>
             null;
@@ -586,6 +637,12 @@ package body Grt.Vpi is
                                          Ref => Res);
          when vpiParameter =>
             return new struct_vpiHandle'(mType => vpiParameter,
+                                         Ref => Res);
+         when vpiNetArray =>
+            return new struct_vpiHandle'(mType => vpiNetArray,
+                                         Ref => Res);
+         when vpiStructNet =>
+            return new struct_vpiHandle'(mType => vpiStructNet,
                                          Ref => Res);
          when others =>
             return null;
@@ -1492,6 +1549,8 @@ package body Grt.Vpi is
    begin
       Vhpi_Iterator (Rel, Scope, It, Err);
       if Err /= AvhpiErrorOk then
+         Trace_Newline;
+         Trace("Faild to get iterator");
          return;
       end if;
 
@@ -1502,6 +1561,14 @@ package body Grt.Vpi is
          exit when Err /= AvhpiErrorOk;
 
          El_Name := Avhpi_Get_Base_Name (Res);
+         Trace_Newline;
+         Trace("******************************** Find by Name");
+         Trace_Newline;
+         Trace(" Res is ");
+         Trace_Newline;
+         Trace("And name is ");
+         Trace(El_Name);
+         Trace_Newline;
          exit when El_Name /= null and then Strcasecmp (Name, El_Name);
       end loop;
    end Find_By_Name;
@@ -1548,8 +1615,12 @@ package body Grt.Vpi is
 
          if Err = AvhpiErrorOk then
             --  Found!
+            Trace_Newline;
+            Trace("Found " & Name (B .. E));
             Base := El;
          else
+            Trace_Newline;
+            Trace("Not Found");
             --  Not found.
             return null;
          end if;
