@@ -27,6 +27,20 @@ with Grt.Vstrings; use Grt.Vstrings;
 with Grt.Rtis_Utils; use Grt.Rtis_Utils;
 with Grt.To_Strings;
 
+-- Acronyms that I don't understand:
+   -- Rti
+   -- Rtis
+   -- Rtin
+
+
+-- High level stuff I don't understand:
+   -- Explanation for the Ctxt objects would be really helpful.
+   -- Why are they used, and what do they represent?
+   -- When I implement new features in grt-avhpi should I write tests?
+   -- If yes, where would these tests go, and are there any examples?
+   -- Does ghdl support a VHPI interface?  I know VPI is supported.
+   -- This would make it easier to test the grt-avhpi logic.
+
 package body Grt.Avhpi is
    procedure Get_Root_Inst (Res : out VhpiHandleT) is
    begin
@@ -126,14 +140,18 @@ package body Grt.Avhpi is
             end case;
          when VhpiIndexedNames =>
             case Ref.Kind is
-               when VhpiGenericDeclK =>
+               when VhpiGenericDeclK |
+                    VhpiPortDeclK |
+                    VhpiSigDeclK =>
                   Res := (Kind => AvhpiNameIteratorK,
                           Ctxt => Ref.Ctxt,
+                          -- What does the 'N_' indicate?
                           N_Addr => Avhpi_Get_Address (Ref),
                           N_Type => Ref.Obj.Obj_Type,
                           N_Idx => 0,
                           N_Obj => Ref.Obj);
-               when VhpiIndexedNameK =>
+               when VhpiIndexedNameK |
+                    VhpiSelectedNameK =>
                   Res := (Kind => AvhpiNameIteratorK,
                           Ctxt => Ref.Ctxt,
                           N_Addr => Ref.N_Addr,
@@ -145,6 +163,8 @@ package body Grt.Avhpi is
                   return;
             end case;
             case Res.N_Type.Kind is
+               -- Why only Ghdl_Rtik_Subtype_Array?
+               -- Why not also Ghdl_Rtik_Type_Array?
                when Ghdl_Rtik_Subtype_Array =>
                   declare
                      St : constant Ghdl_Rtin_Subtype_Composite_Acc :=
@@ -158,15 +178,50 @@ package body Grt.Avhpi is
                        Loc_To_Addr (St.Common.Depth, St.Layout, Res.Ctxt);
                      Bound_To_Range
                        (Array_Layout_To_Bounds (Layout), Bt, Rngs);
+                     -- So N_Idx is the length of the array when we create
+                     -- the iterator.  Later on we see that it is decremented
+                     -- during scanning.
                      Res.N_Idx := Ranges_To_Length (Rngs, Bt.Indexes);
                   end;
                when others =>
                   Error := AvhpiErrorBadRel;
             end case;
             return;
-         when VhpiRecordElems  =>
-            begin
-            end; 
+         when VhpiSelectedNames =>
+            case Ref.Kind is
+               when VhpiSigDeclK |
+                    VhpiPortDeclK |
+                    VhpiGenericDeclK =>
+                  Res := (Kind => AvhpiRecordIteratorK,
+                          Ctxt => Ref.Ctxt,
+                          N_Addr => Avhpi_Get_Address (Ref),
+                          N_Type => Ref.Obj.Obj_Type,
+                          N_Idx => 0,
+                          N_Obj => Ref.Obj);
+               when VhpiIndexedNameK |
+                    VhpiSelectedNameK =>
+                  Res := (Kind => AvhpiRecordIteratorK,
+                          Ctxt => Ref.Ctxt,
+                          N_Addr => Ref.N_Addr,
+                          N_Type => Ref.N_Type,
+                          N_Idx => 0,
+                          N_Obj => Ref.N_Obj);
+               when others =>
+                  Error := AvhpiErrorNotImplemented;
+                  return;
+            end case;
+            case Res.N_Type.Kind is
+               when Ghdl_Rtik_Type_Record =>
+                  declare
+                     Rc : constant Ghdl_Rtin_Type_Record_Acc :=
+                       To_Ghdl_Rtin_Type_Record_Acc (Res.N_Type);
+                  begin
+                     Res.N_Idx := Rc.Nbrel;
+                  end;
+               when others =>
+                  Error := AvhpiErrorBadRel;
+            end case;
+            return;
          when others =>
             null;
       end case;
@@ -175,7 +230,16 @@ package body Grt.Avhpi is
       Error := AvhpiErrorNotImplemented;
    end Vhpi_Iterator;
 
-   --  OBJ_RTI is the RTI for the base name.
+   --  A helper function to deal with incrementing indices
+   --  when scanning iterators.
+   --  `Obj_Base` is the pointer that we're going to increment.
+   --  `Ctxt`, `Obj_Rti`, and `El_type` are all used to get the
+   --     size of an element.
+   --     `Obj_Rti` is the object that the array is in. Useful
+   --        so we can tell whether it's a signal or array.
+   --     `El_Type` gives type of the array element.
+   --  `Off` is short for "offset" and is the number of elements
+   --     that we will increment the pointer.
    function Add_Index (Ctxt : Rti_Context;
                        Obj_Base : Address;
                        Obj_Rti : Ghdl_Rtin_Object_Acc;
@@ -187,6 +251,9 @@ package body Grt.Avhpi is
       El_Type1 : Ghdl_Rti_Access;
    begin
       case Obj_Rti.Common.Kind is
+         -- Does this mean we only support scanning iterators in
+         -- generics.  That doesn't make much sense.
+         -- What am I missing?
          when Ghdl_Rtik_Generic =>
             Is_Sig := False;
          when others =>
@@ -202,6 +269,12 @@ package body Grt.Avhpi is
       case El_Type1.Kind is
          when Ghdl_Rtik_Type_P64 =>
             if Is_Sig then
+               -- This is currently never run, but why would
+               -- this be different for generics and signals?
+               -- Maybe signals are built as structures of signals,
+               -- but generics are raw?  So signals effectively
+               -- contain lots of thin signal wrappers that we're
+               -- pointing at.
                El_Size := Address'Size / Storage_Unit;
             else
                El_Size := Ghdl_I64'Size / Storage_Unit;
@@ -210,6 +283,10 @@ package body Grt.Avhpi is
             declare
                Sizes : Ghdl_Indexes_Ptr;
             begin
+               -- An explanation of what's going on here would be really
+               -- helpful.
+               -- It looks like we're finding out the size of the structure
+               -- but I've failed to understand how.
                Sizes := To_Ghdl_Indexes_Ptr
                  (Loc_To_Addr
                     (El_Type1.Depth,
@@ -222,24 +299,34 @@ package body Grt.Avhpi is
                end if;
             end;
          when others =>
+            -- Feels like we supported a strange subset of possible types.
+            -- I'm curious what drove the supported features in this
+            -- implementation.
             Internal_Error ("add_index");
       end case;
+      -- So basically we're calcuating the size of what the pointer is pointing
+      -- to and then incrementing the base pointer appropriately.
       return Obj_Base + Off * El_Size;
    end Add_Index;
 
+   -- An implementation of vhpi_scan for AvhpiNameIteratorK.
    procedure Vhpi_Scan_Indexed_Name (Iterator : in out VhpiHandleT;
                                      Res : out VhpiHandleT;
                                      Error : out AvhpiErrorT)
    is
       El_Type : Ghdl_Rti_Access;
    begin
+      -- This implies Iterator.N_Idx is used to count down through the
+      -- iterator elements.
       if Iterator.N_Idx = 0 then
          Error := AvhpiErrorIteratorEnd;
          return;
       end if;
 
+      -- Get the Rti type of the array elements.
       El_Type := To_Ghdl_Rtin_Type_Array_Acc
         (Get_Base_Type (Iterator.N_Type)).Element;
+
 
       Res := (Kind => VhpiIndexedNameK,
               Ctxt => Iterator.Ctxt,
@@ -252,10 +339,46 @@ package body Grt.Avhpi is
       Iterator.N_Addr := Add_Index
         (Iterator.Ctxt, Iterator.N_Addr, Iterator.N_Obj, El_Type, 1);
 
+      -- Decrement number of elements left in iterator.
       Iterator.N_Idx := Iterator.N_Idx - 1;
       Error := AvhpiErrorOk;
    end Vhpi_Scan_Indexed_Name;
 
+   -- An implementation of vhpi_scan for AvhpiRecordIteratorK.
+   procedure Vhpi_Scan_Selected_Name (Iterator : in out VhpiHandleT;
+                                      Res : out VhpiHandleT;
+                                      Error : out AvhpiErrorT)
+   is
+      El_Type : Ghdl_Rti_Access;
+   begin
+      -- This implies Iterator.N_Idx is used to count down through the
+      -- iterator elements.
+      if Iterator.N_Idx = 0 then
+         Error := AvhpiErrorIteratorEnd;
+         return;
+      end if;
+
+      -- Get the Rti types of the record elements.
+      El_Type := To_Ghdl_Rtin_Type_Record_Acc
+        (Get_Base_Type (Iterator.N_Type)).Elements(Iterator.N_Idx);
+
+      Res := (Kind => VhpiSelectedNameK,
+              Ctxt => Iterator.Ctxt,
+              N_Addr => Iterator.N_Addr,
+              N_Type => El_Type,
+              N_Idx => 0,
+              N_Obj => Iterator.N_Obj);
+
+      --  Increment Address.
+      Iterator.N_Addr := Add_Index
+        (Iterator.Ctxt, Iterator.N_Addr, Iterator.N_Obj, El_Type, 1);
+
+      -- Decrement number of elements left in iterator.
+      Iterator.N_Idx := Iterator.N_Idx - 1;
+      Error := AvhpiErrorOk;
+   end Vhpi_Scan_Selected_Name;
+
+   -- An implementation of vhpi_scan with many-to-one map of InternalRegions
    procedure Vhpi_Scan_Internal_Regions (Iterator : in out VhpiHandleT;
                                          Res : out VhpiHandleT;
                                          Error : out AvhpiErrorT)
@@ -271,6 +394,7 @@ package body Grt.Avhpi is
       end if;
 
       loop
+         -- This is just a label marker for goto statements.
          << Again >> null;
          if Iterator.It_Cur >= Blk.Nbr_Child then
             Error := AvhpiErrorIteratorEnd;
@@ -376,6 +500,7 @@ package body Grt.Avhpi is
       end if;
    end Vhpi_Scan_Root_Design;
 
+   -- Take a ghdl rti object and create a vhpi handle for it.
    procedure Rti_To_Handle (Rti : Ghdl_Rti_Access;
                             Ctxt : Rti_Context;
                             Res : out VhpiHandleT)
@@ -401,6 +526,7 @@ package body Grt.Avhpi is
                Bt : constant Ghdl_Rtin_Type_Array_Acc :=
                  To_Ghdl_Rtin_Type_Array_Acc (Atype.Basetype);
             begin
+               -- I don't understand what's happening here.
                if Atype.Name = Bt.Name then
                   Res := (Kind => VhpiArrayTypeDeclK,
                           Ctxt => Ctxt,
@@ -441,6 +567,8 @@ package body Grt.Avhpi is
       end case;
    end Rti_To_Handle;
 
+   -- vphi_scan for one-to-many mapping Decls
+   -- This lets us iterate through all the declarations.
    procedure Vhpi_Scan_Decls (Iterator : in out VhpiHandleT;
                               Res : out VhpiHandleT;
                               Error : out AvhpiErrorT)
@@ -546,6 +674,14 @@ package body Grt.Avhpi is
                   Error := AvhpiErrorHandle;
                   Res := Null_Handle;
             end case;
+         when AvhpiRecordIteratorK =>
+            case Iterator.N_Type.Kind is
+               when Ghdl_Rtik_Type_Record =>
+                  Vhpi_Scan_Selected_Name (Iterator, Res, Error);
+               when others =>
+                  Error := AvhpiErrorHandle;
+                  Res := Null_Handle;
+            end case;
          when VhpiIteratorK =>
             case Iterator.Rel is
                when VhpiPackInsts =>
@@ -606,6 +742,7 @@ package body Grt.Avhpi is
             return Obj.Obj.Name;
          when VhpiSubtypeDeclK =>
             return To_Ghdl_Rtin_Subtype_Scalar_Acc (Obj.Atype).Name;
+         -- TODO: Add implementations for arrays and records.
          when others =>
             return null;
       end case;
@@ -1053,6 +1190,7 @@ package body Grt.Avhpi is
                when others =>
                   return;
             end case;
+         -- VhpiIndexedNames is used to access the elements in an array.
          when VhpiIndexedNames =>
             declare
                Base_Type, El_Type : VhpiHandleT;

@@ -153,8 +153,10 @@ package Grt.Avhpi is
       VhpiWaveformElemK,
       VhpiWhileLoopK,
 
-      --  Iterator, but on a name.
+      --  Iterator, but on an array.
       AvhpiNameIteratorK,
+      --  Iterator, over array elements.
+      AvhpiRecordIteratorK,
 
       --  Root scope that contains the top entity.  For vpi.
       AvhpiRootScopeK,
@@ -431,20 +433,33 @@ package Grt.Avhpi is
                           Res : out VhpiHandleT;
                           Error : out AvhpiErrorT);
 
+   -- TODO: Should also handle records.
    procedure Vhpi_Handle_By_Index (Rel : VhpiOneToManyT;
                                    Ref : VhpiHandleT;
                                    Index : Natural;
                                    Res : out VhpiHandleT;
                                    Error : out AvhpiErrorT);
 
+   -- TODO:
+   -- procedure Vhpi_Handle_By_Name (Rel : VhpiOneToManyT;
+   --                                Ref : VhpiHandleT;
+   --                                Name : String;
+   --                                Res : out VhpiHandleT;
+   --                                Error : out AvhpiErrorT);
+
+   -- TODO: Should be able to create an iterator over a record.
    procedure Vhpi_Iterator (Rel : VhpiOneToManyT;
                             Ref : VhpiHandleT;
                             Res : out VhpiHandleT;
                             Error : out AvhpiErrorT);
+
+   -- TODO: Should be able to scan a record.
    procedure Vhpi_Scan (Iterator : in out VhpiHandleT;
                         Res : out VhpiHandleT;
                         Error : out AvhpiErrorT);
 
+   -- TODO: We need to be able to get the name of a record field.
+   --       Anything else?
    procedure Vhpi_Get_Str (Property : VhpiStrPropertyT;
                            Obj : VhpiHandleT;
                            Res : out String;
@@ -456,6 +471,7 @@ package Grt.Avhpi is
 
    subtype VhpiIntT is Ghdl_I32;
 
+   -- TODO: And get values from record fields.
    procedure Vhpi_Get (Property : VhpiIntPropertyT;
                        Obj : VhpiHandleT;
                        Res : out VhpiIntT;
@@ -511,8 +527,10 @@ package Grt.Avhpi is
       VhpiBufferMode,
       VhpiLinkageMode
      );
+   -- TODO: Record support.
    function Vhpi_Get_Mode (Obj : VhpiHandleT) return VhpiModeT;
 
+   -- TODO: Record support.
    function Avhpi_Get_Rti (Obj : VhpiHandleT) return Ghdl_Rti_Access;
 
    function Avhpi_Get_Address (Obj : VhpiHandleT) return Address;
@@ -521,6 +539,7 @@ package Grt.Avhpi is
 
    function Vhpi_Get_Kind (Obj : VhpiHandleT) return VhpiClassKindT;
 
+   -- TODO: Record support.
    function Vhpi_Put_Value (Obj : VhpiHandleT; Val : Ghdl_I64)
                            return AvhpiErrorT;
 private
@@ -536,7 +555,9 @@ private
             It2 : Ghdl_Index_Type;
             Max2 : Ghdl_Index_Type;
          when AvhpiNameIteratorK
-           | VhpiIndexedNameK =>
+           | AvhpiRecordIteratorK
+           | VhpiIndexedNameK
+           | VhpiSelectedNameK=>
             N_Addr : Address;
             N_Type : Ghdl_Rti_Access;
             N_Idx : Ghdl_Index_Type;

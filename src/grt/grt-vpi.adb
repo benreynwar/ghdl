@@ -1550,7 +1550,7 @@ package body Grt.Vpi is
       Vhpi_Iterator (Rel, Scope, It, Err);
       if Err /= AvhpiErrorOk then
          Trace_Newline;
-         Trace("Faild to get iterator");
+         Trace("Failed to get iterator");
          return;
       end if;
 
@@ -1607,11 +1607,45 @@ package body Grt.Vpi is
             end loop;
          end;
 
-         --  Find name in Base, first as a decl, then as a sub-region.
-         Find_By_Name (Base, VhpiDecls, Name (B .. E), El, Err);
-         if Err /= AvhpiErrorOk then
-            Find_By_Name (Base, VhpiInternalRegions, Name (B .. E), El, Err);
-         end if;
+         case Vhpi_Get_Kind(Base) is
+            when VhpiPortDeclK
+               | VhpiSigDeclK
+               | VhpiGenericDeclK =>
+               declare
+                  Sig_Type : VhpiHandleT;
+                  Rti : Ghdl_Rti_Access;
+                  Error : AvhpiErrorT;
+               begin
+                  Vhpi_Handle (VhpiSubtype, Base, Sig_Type, Error);
+                  if Error /= AvhpiErrorOk then
+                     return null;
+                  end if;
+                  Rti := Avhpi_Get_Rti (Sig_Type);
+                  case Rti.Kind is
+                     when Ghdl_Rtik_Type_Record =>
+                        Trace_Newline;
+                        Trace("## It's a record!");
+                        Find_By_Name (Base, VhpiSelectedNames,
+                                      Name (B .. E), El, Err);
+                        if Err /= AvhpiErrorOk then
+                           Trace_Newline;
+                           Trace("## There was an error");
+                        end if;
+                     when others =>
+                        Trace_Newline;
+                        Trace("## It's not a record");
+                        return null;
+                  end case;
+               end;
+            when others =>
+               --  Find name in Base, first as a decl, then as a sub-region.
+               Find_By_Name (Base, VhpiDecls, Name (B .. E), El, Err);
+               if Err /= AvhpiErrorOk then
+                  Find_By_Name (Base, VhpiInternalRegions,
+                                Name (B .. E), El, Err);
+               end if;
+         end case;
+
 
          if Err = AvhpiErrorOk then
             --  Found!
