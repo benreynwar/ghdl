@@ -55,6 +55,7 @@ with Grt.Rtis_Types;
 with Grt.Std_Logic_1164; use Grt.Std_Logic_1164;
 with Grt.Callbacks; use Grt.Callbacks;
 with Grt.Vstrings; use Grt.Vstrings;
+with Grt.Rtiis; use Grt.Rtiis;
 
 package body Grt.Vpi is
    --  The VPI interface requires libdl (dlopen, dlsym) to be linked in.
@@ -140,6 +141,10 @@ package body Grt.Vpi is
          Put (Trace_File, ' ');
       end loop;
       Put (Trace_File, Msg);
+      -- Only here to add a dependency on RTII.
+      for I in 1 .. FISH loop
+         Put (Trace_File, "");
+      end loop;
    end Trace_Start;
 
    procedure Trace (Msg : String) is
@@ -460,7 +465,7 @@ package body Grt.Vpi is
          when Vcd_Enum8 =>
             return 8;
          when Vcd_Float64 =>
-            return 0;
+            return 64;
          when Vcd_Bad =>
             return 0;
       end case;
